@@ -19,6 +19,7 @@ This repository contains the complete simulation and analysis framework develope
   - Compression response of bilayers
   - Shear dynamics and tribological properties
 - Supports **linear**, **cyclic**, **loop**, and **bottlebrush** chain architectures
+- Supports implicit or explicit solvents.
 - Easily extensible to new chemistries, solvents, or topologies
 - Includes:
   - Parameter sweep generation (`BuildSims.py`)
@@ -58,7 +59,7 @@ sci-md-polymer-brush-bilayers/
 ---
 ## 📦 Installation
 
-Create a virtual environment and install dependencies:
+Create a virtual environment and install dependencies (for analysis notebooks):
 
 ```bash
 python -m venv venv
@@ -67,11 +68,11 @@ pip install -r requirements.txt
 ```
 ---
 
-## 🚀 How to Use
+## How to Use
 
 ### 1. Choose an Architecture
 
-Copy `simulation_scripts/` to a new folder (e.g., `Loop/`, `Cyclic/`).  
+Copy `simulation_scripts/` to a new folder (e.g., `Linear/`, `Cyclic/`).  
 Edit `main.in` to set:
 - Chain length `N`
 - Grafting density `M`
