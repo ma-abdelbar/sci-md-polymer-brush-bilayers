@@ -1,0 +1,10 @@
+numpy
+pandas
+matplotlib
+scipy
+uncertainties
+jupyter
+
+# Optional: only needed for visualization.ipynb
+# Not installable via pip, see https://www.ovito.org/python/introduction/
+# ovito

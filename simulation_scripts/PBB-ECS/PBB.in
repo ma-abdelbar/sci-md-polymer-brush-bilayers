@@ -1,0 +1,284 @@
+# This is an input script that creates a mono disperse polymer brush bilayer
+# A coarse grained bead-spring model is used for the polymers which are end
+# grafted to the surfaces of 2 opposing FCC walls at random sites.
+# The polymer chains can be end grafted to each other to form Loops
+
+#--- Initialization ---#
+
+dimension     3
+boundary      p p f                 # periodic in x and y, but finite in z
+units         lj                    # Using LJ units
+atom_style    angle                  # Can only define bonds, no angles or dihedrals
+
+#--- Variables ---#
+
+variable      zhi    equal  $(1.1 * 2 * v_N + (2 * v_wthick))  # The initial height of the simulation box the value is such that no overlaps occur
+variable      z0     equal  $((v_zhi)/4 - (v_N)/30)            ###What is this /30?### This is the location at which to place the CoM of the molecule when added
+
+print "The number of grafted chains = $(v_M)"
+print "The number of beads per chain = $(v_N)"
+
+variable      check  equal count(all)              # The number of atoms in the system
+variable      ntwall equal count(twall)            # The number of atoms in the top wall
+variable      nbwall equal count(bwall)            # The number of atoms in the bottom wall
+variable      s      equal 236297                  # Seed for the RNG
+variable      Ntot   equal $(v_N + (v_M_s * v_N_s))    # The total number of beads
+print         "M_s = ${M_s}"
+print         "Ntot = ${Ntot}"
+#--- Create the simulation box ---#
+
+region        sbox block 0 ${xhi} 0 ${yhi} 0 ${zhi}
+create_box    4 sbox bond/types 2 angle/types 2 extra/angle/per/atom 5 extra/bond/per/atom 12 extra/special/per/atom 2
+
+mass          1 1.0                   # atom 1 Wall atoms
+mass          2 1.0                   # atom 2 Bottom Beads
+mass          3 1.0                   # atom 3 Top Beads
+mass          4 1.0                   # atom 4 Solvent Beads
+
+
+bond_style    hybrid fene harmonic                      # Finitely extensible linearly elastic bond between neighbouring beads
+bond_coeff    1 fene 30.0 200.0 1.0 1.0                  # NOTE: The Rmax is set to 30 only for this script
+bond_coeff    2 harmonic 800.0 $(1.5874 * sqrt(2)/2)    # These values are to keep the FFC wall structure
+special_bonds fene                                      # This kills the pairwise energy between all atoms that are directly bonded
+
+angle_style cosine/delta
+angle_coeff   1 ${kB_m} 180
+angle_coeff   2 ${kB_s} 90
+
+pair_style soft 1.0
+pair_coeff * * 10.0
+
+neighbor      5 bin                    # skin = 5 sigma  for neighbor list cutoff = force cutoff + skin
+neigh_modify  one 2000                 # max number of neighbors of one atom
+
+#--- Calculate Architecture Variables---#
+
+#variable     M_ln   equal $((1-(v_R_frac + v_L_frac))*(v_M))
+variable     M_Ri  equal $(floor((v_R_frac * v_R_M_scale) * (v_M)))
+variable     M_Lo  equal $(floor((v_L_frac * v_L_M_scale) * (v_M)))
+variable     M_ln equal $(v_M - (v_M_Ri/v_R_M_scale) - (v_M_Lo/v_L_M_scale))
+variable     M_chains   equal $(v_M_ln + v_M_Ri + v_M_Lo)
+
+variable     G      equal $((v_M_ln + v_M_Ri + (v_M_Lo/v_L_M_scale))+1)
+
+variable     N_mR equal $(v_N_m * v_R_N_scale)
+variable     N_mL equal $(v_N_m * v_L_N_scale)
+
+variable     fname_ln string linear.txt
+python        BSMolf input 4 ${N_m} ${N_s} ${M_s} ${fname_ln} format iiis file BSMolBuilder.py
+python        BSMolf invoke
+molecule  BSlin linear.txt
+
+variable     fname_Ri string ring.txt
+python        BSMolf input 4 ${N_mR} ${N_s} ${M_s} ${fname_Ri} format iiis file BSMolBuilder.py
+python        BSMolf invoke
+molecule  BSring ring.txt
+
+variable     fname_Lo string loop.txt
+python        BSMolf input 4 ${N_mL} ${N_s} ${M_s} ${fname_Lo} format iiis file BSMolBuilder.py
+python        BSMolf invoke
+molecule  BSloop loop.txt
+
+molecule  BSsol solvent.txt
+
+info variables                              # For diagnostics
+
+
+#--- Define the FCC wall region ---#
+region        wall  block 0 ${xhi} 0 ${yhi} 0 ${wthick}
+lattice       fcc 1
+
+
+
+#--- Create the Top Brush  (At the bottom then rotate 180 degrees to top) ---#
+
+create_atoms  1 region wall
+group         twall  region wall
+
+# A loop to insert the Chains into the sim box and bond them to random wall atoms
+#-------------------------------------------------------------------------------------------------------------------#
+variable      Gt loop ${G}                             # Iterator for number of Grafts
+variable      i loop ${M_chains}                          # Index to insert M_chains total number of chains
+group         twg2 empty
+group         twg_inter empty
+label         loop
+# Start of loop
+label         TWatom1
+variable      randni equal round(random(1,${ntwall},$s))  # Pick a random "top" wall atom
+variable      randatomi equal ${randni}                   # This is to obtain an integer number for atom-id
+variable      randzi equal z[${randatomi}]                # Determine the z coordinate of the chosen atom
+if            "${randzi} < $(v_wthick - 0.7)" then "jump PBB.in TWatom1" # if the chosen atom is not a surface atom then restart the loop
+group         twg id ${randatomi}# Add this atom to a top-wall-grafted group
+variable      twgcount equal count(twg)
+print         "i= $i"
+print        "Gt= ${Gt}"
+if            "${twgcount} != $(v_Gt)" then "jump PBB.in TWatom1" # if they are not equal then the atom has already been picked and we restart loop with same i
+# At this point we have picked a new random wall atom
+variable      x0 equal x[${randatomi}]                    # Determine its x-coord
+variable      y0 equal y[${randatomi}]                    # Determine its y-coord
+variable      b equal $(v_check + 1)
+
+if "$(v_i <= v_M_ln)" then &
+"variable b2 equal $(v_b + v_N_m - 1)" &
+"create_atoms  2 single ${x0} ${y0} ${z0} mol BSlin 24987 units box remap yes rotate 0 0 0 1" &
+"variable skipa2 equal 1" &
+elif "$(v_i > v_M_ln) && $(v_i <= (v_M_ln + v_M_Ri))" &
+"create_atoms  2 single ${x0} ${y0} ${z0} mol BSring 24987 units box remap yes rotate 0 0 0 1" &
+"variable b2 equal $(v_b + v_N_mR - 1)" &
+"variable skipa2 equal 1" &
+else  &
+"create_atoms  2 single ${x0} ${y0} ${z0} mol BSloop 24987 units box remap yes rotate 0 0 0 1" &
+"variable b2 equal $(v_b + v_N_mL - 1)" &
+"variable skipa2 equal 0"
+
+print "skipa2 = ${skipa2}"
+set           mol $(mol[v_b]) mol $(v_i*2)                # For to split the top and bottom bead ids
+create_bonds  single/bond 1 ${randatomi} $b               # Bonded one end to the wall
+next Gt
+print "b=$b and b2=${b2} "
+
+if "$(v_i > v_M_ln) && $(v_i <= (v_M_ln + v_M_Ri))"  then &
+"create_bonds single/bond 1 $b ${b2}" &
+
+if "${skipa2} == 1" then "jump PBB.in skipa2"
+
+# IF we are here that means that we have fully inserted all of the Linear and Ring chains
+label         TWatom2
+group         twg2 clear
+group         twg_inter clear
+variable      randn2i equal round(random(1,${ntwall},$s))  # Pick a random "top" wall atom
+variable      randatom2i equal ${randn2i}                   # This is to obtain an integer number for atom-id
+variable      randz2i equal z[${randatom2i}]                # Determine the z coordinate of the chosen atom
+if            "${randz2i} < $(v_wthick - 0.7)" then "jump PBB.in TWatom2" # if the chosen atom is not a surface atom then restart the loop
+group         twg2 id ${randatom2i}
+group         twg_inter intersect twg twg2
+variable      twg_inter equal count(twg_inter)
+if            "${twg_inter} != 0" then "jump PBB.in TWatom2" # if they are not equal then the atom has already been picked and we restart loop with same i
+create_bonds single/bond 1 ${b2} ${randatom2i}
+group         twg id ${randatom2i}
+next Gt
+label skipa2
+next i
+jump PBB.in loop                                         # End of the loop
+
+
+#-------------------------------------------------------------------------------------------------------------------#
+
+# Rotate the created brush about the centre of the simulation box by 180 degrees to make it true top brush
+displace_atoms all rotate $(v_xhi/2.0) $(v_yhi/2.0) $(v_zhi/2.0 - 1) 1 0 0 180 units box
+#-------------------------------------------------------------------------------------------------------------------#
+
+variable      ntop0 equal ${check}          # Count the total number of atoms in the top brush
+
+#--- Create the Bottom brush ---#
+
+# Repeating the same procedure as above again but with new atoms
+#-------------------------------------------------------------------------------------------------------------------#
+create_atoms  1 region wall
+group         bwall region wall
+
+variable      nbwall0 equal ${nbwall}
+
+variable      Gb loop ${G}                              # Iterator for number of Grafts
+variable      j loop ${M_chains}
+group         bwg2 empty
+group         bwg_inter empty
+label         loopj
+# Start of Loop
+label         BWatom1
+variable      randnj equal round(random(v_ntop0,$(v_ntop0 + v_nbwall0),$s))
+variable      randatomj equal ${randnj}
+variable      randzj equal z[${randatomj}]
+if            "${randzj} < $(v_wthick - 0.7)" then "jump PBB.in BWatom1"
+group         bwg id ${randatomj}                         # Add this atom to a bot-wall-grafted group
+variable      bwgcount equal count(bwg)
+print         "j= $j"
+print        "Gb= ${Gb}"
+if            "${bwgcount} != $(v_Gb)" then "jump PBB.in BWatom1"
+# At this point we have picked a new random wall atom
+variable      x0 equal x[${randatomj}]
+variable      y0 equal y[${randatomj}]
+variable      b equal $(v_check + 1)
+
+if "$(v_j <= v_M_ln)" then &
+"variable b2 equal $(v_b + v_N_m - 1)" &
+"create_atoms  1 single ${x0} ${y0} ${z0} mol BSlin 24987 units box remap yes rotate 0 0 0 1" &
+"variable bskipa2 equal 1" &
+elif "$(v_j > v_M_ln) && $(v_j <= (v_M_ln + v_M_Ri))" &
+"create_atoms  1 single ${x0} ${y0} ${z0} mol BSring 24987 units box remap yes rotate 0 0 0 1" &
+"variable b2 equal $(v_b + v_N_mR - 1)" &
+"variable bskipa2 equal 1" &
+else &
+"create_atoms  1 single ${x0} ${y0} ${z0} mol BSloop 24987 units box remap yes rotate 0 0 0 1" &
+"variable b2 equal $(v_b + v_N_mL - 1)" &
+"variable bskipa2 equal 0"
+
+print "bskipa2 = ${bskipa2}"
+set           mol $(mol[v_b]) mol $(v_j * 2 - 1)
+create_bonds  single/bond 1 ${randatomj} $b
+next Gb
+print "b=$b and b2=${b2} "
+
+if "$(v_j > v_M_ln) && $(v_j <= (v_M_ln + v_M_Ri))" then &
+"create_bonds single/bond 1 $b ${b2}" &
+
+if "${bskipa2} == 1" then "jump PBB.in bskipa2"
+
+label         BWatom2
+group         bwg2 clear
+group         bwg_inter clear
+variable      randn2j equal round(random(v_ntop0,$(v_ntop0 + v_nbwall0),$s))  # Pick a random "top" wall atom
+variable      randatom2j equal ${randn2j}                   # This is to obtain an integer number for atom-id
+variable      randz2j equal z[${randatom2j}]                # Determine the z coordinate of the chosen atom
+if            "${randz2j} < $(v_wthick - 0.7)" then "jump PBB.in BWatom2" # if the chosen atom is not a surface atom then restart the loop
+group         bwg2 id ${randatom2j}
+group         bwg_inter intersect bwg bwg2
+variable      bwg_inter equal count(bwg_inter)
+if            "${bwg_inter} != 0" then "jump PBB.in BWatom2" # if they are not equal then the atom has already been picked and we restart loop with same i
+create_bonds single/bond 1 ${b2} ${randatom2j}
+group         bwg id ${randatom2i}
+next Gb
+label bskipa2
+next j
+jump PBB.in loopj
+
+#--- Create harmonic bonds in the walls ---#
+
+create_bonds  many bwall bwall 2 0.5 1.2    # Create Harmonic bonds in walls between nearest neighbors
+create_bonds  many twall twall 2 0.5 1.2    # 12 bonds for each atom. Also creates special bonds.
+
+
+#--- Insert Solvent particles ---#
+variable      s_z0 equal 0.3*${zhi}
+variable      s_z1 equal 0.7*${zhi}
+region        solvent  block 0 ${xhi} 0 ${yhi} ${s_z0} ${s_z1} units box
+create_atoms  3 random $(v_N_solv/2) 65433 solvent mol BSsol 234786
+
+
+
+fix           ftop twall setforce 0.0 0.0 0.0  # Freeze top wall
+fix           fbot bwall setforce 0.0 0.0 0.0  # Freeze bottom wall
+
+
+#--- Minimize the system to obtain the initial structure for the PB bilayer ---#
+
+minimize      1.0e-6 1.0e-10 10000 100000
+
+#--- Shrink the simulation box such that it encloses the system exactly ---#
+
+variable z_f equal bound(all,zmin)
+variable z_c equal bound(all,zmax)
+
+change_box all z final ${z_f} $(v_z_c + 0.1) units box
+
+info system
+info variables                              # For diagnostics
+
+
+#--- Remove the fixes for the restart file ---#
+unfix        ftop
+unfix        fbot
+
+#--- Write Restart File ---#
+write_restart  PBB.rst
+#write_data     PBB.data

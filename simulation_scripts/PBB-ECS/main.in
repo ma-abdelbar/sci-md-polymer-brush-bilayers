@@ -1,0 +1,113 @@
+#--- Brush Variables ---#
+variable      M         equal  60                # The number of polymer chains grafted per brush
+variable      N         equal  30                 # The number of beads per chain backbone
+variable      xhi       equal  30                 # The width of the polymer Brush
+variable      yhi       equal  25                 # The length of the polymer Brush
+variable      wthick    equal  3                  # The thickness of the FFC walls wthick=1,2,3,4 gives 2,3,4,6 layers respectively
+
+#---BB Chain Structure ---#
+variable      N_s       equal 0                  # The number of beads per side chain
+variable      M_s       equal 10                 # The number of beads gap between side chains
+variable      N_m       equal $(v_N - (v_M_s * v_N_s)) # The number of main chain bonds is calculated based on N - N_s * M_s
+
+#---Ring Chains---#
+variable      R_N_scale equal 2                 # N_mR = N_m * R_N_scale
+variable      R_M_scale equal 0.5               # M_Ri = R_frac * R_M_scale * M where
+variable      R_frac    equal 0
+
+#---Looped Chains---#
+variable      L_N_scale equal 2                 # N_mR = N_m * R_N_scale
+variable      L_M_scale equal 0.5
+variable      L_frac    equal 0
+
+#--- Solvent ---#
+variable      N_solv    equal 1800
+
+#--- Simulation Variables ---#
+variable       Tstep     equal 0.004            # Timestep in Tau (default = 0.005)   time = sqrt(m/eps) = 10^-12 s  Tstep = 10^-14s
+variable       Nequil    equal 1500000          # Number of timesteps to equilibrate
+variable       Npre      equal 500000           # Number of timesteps to pre compress
+variable       Ncomp     equal 1500000          # Number of timesteps to compress
+variable       Nshear_min   equal 5000000       # minimum number of timesteps to shear
+variable       Nshear_max   equal 15000000      # maximum number of timesteps to shear
+variable       laps         equal 3             # target amount of laps around the brushes length lx
+variable       Nthermo      equal 10000          # Number of timesteps between thermo data prints
+variable       NFrames_e    equal 10             # Number of snapshot frames to take at equilibration (0.41Mb/frame)
+variable       NFrames_c    equal 20             # Number of snapshot frames to take at equilibration (0.41Mb/frame)
+variable       NFrames_s    equal 30            # Number of snapshot frames to take at equilibration (0.41Mb/frame)
+variable       X            equal  0            # Placeholder for any variable we would like to vary (stiffness)
+variable       Wall_control string D            # P or D
+variable       Dcomp        equal 20
+variable       Pcomp        equal 1             # Compressive Pressures applied to top wall
+variable       Vwalli       index 1 0.3 0.1 0.03 0.01 0.003 0.001           # Relative wall Velocities (+-Vwall/2) in x direction
+#--- ForceFields ---#
+#-- Pair style --#
+variable       PStyle       string W               # W=LJ-WCA, T=LJ-TS or C=LJ-COS
+variable       epsLJ    equal 1.0              # 10^21 J (typical)
+variable       sigLJ    equal 1.0              # 10^-9 m = 1 nm (typical) (DO NOT CHANGE THIS!)
+
+#-- LJ-TS (if PStyle=T) --#
+# variable       BB    equal 1.122462048               #1.122462048
+# variable       BT    equal 2.5
+# variable       BS    equal 1.122462048
+# variable       TT    equal 2.5
+# variable       TS    equal 1.122462048
+# variable       SS    equal 1.122462048
+# variable       WX    equal 1.122462048
+
+#-- LJ-COS (if PStyle=C) --#
+# variable       BB    equal 2      #1.122462048
+# variable       BT    equal 0
+# variable       BS    equal 2.0
+# variable       TT    equal 0.2
+# variable       TS    equal 0.5
+# variable       SS    equal 0
+# variable       WX    equal 0
+
+#-- FENE --#
+variable       kFENE    equal 30.0
+variable       RmFENE   equal 1.5
+
+#-- Stiffness --#
+variable       kB_m     equal $(v_X)
+variable       kB_s     equal $(v_X)
+
+#-- Thermostats --#
+variable       TStat       string W               # W= Lang walls, L= Langevin tstat, D=DPD tstat
+variable       T     equal 1.68
+variable       Damp  equal 2                  # L: units of time not (1/t) DPD: units of Force/Velocity (Kg/s)
+
+#--- Simulations ---#
+
+variable       rest     equal 0
+
+if "${rest} == 1" then &
+    "jump    main.in rest_skip" &
+
+include        PBB.in                        # Jump to input script which creates the Brush Bilayer and Minimizes the structure
+print          "Created a Polymer Brush Bilayer with a Grafting density = $(v_M/(lx*ly))"
+
+label          rest_skip
+variable       skip     equal 0
+label          sim                             # Start a Loop that will iterate through Vwalli
+                                               # This will allow us to run multiple simulations on the same Brush at different velocities
+
+include        ECS.in                          # Jump to input script which performs the Equil-Comp-Shear simulation
+# shell          python   post.py                  # Executes a python script which
+shell          mkdir    V=$(v_Vwalli)            # Creates a new folder for each Wall Velocity
+shell          cp -f    *sdz      V=$(v_Vwalli)
+shell          cp -f    shear.log      V=$(v_Vwalli)
+shell          cp -f    log.lammps   V=$(v_Vwalli)  # Saves the log.lammps for each simulation
+shell          cp -f    *sz   V=$(v_Vwalli)      # Saves the log.lammps for each simulation
+shell          cp -f    ECS.rst      V=$(v_Vwalli) # Saves the restart files (ecs.rst, MDPBB.rst)
+shell          cp -f    shear.dump     V=$(v_Vwalli) # Saves the dumps (full_xx.dump, beads_xx.dump)
+
+shell          pwd
+
+log           log.lammps
+variable      rest     equal 0
+variable      skip      equal 1
+next          Vwalli                           # iterate to next Vwalli and start loop again
+jump          main.in sim
+write_restart  final_state.rst
+clear
