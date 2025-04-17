@@ -10,6 +10,7 @@ This repository contains the complete simulation and analysis framework develope
 > **Access under embargo**. This thesis will be publicly available via the Imperial College London Spiral repository once the embargo lifts.
 >
 > This work was funded by the **EPSRC** through the **TSM CDT** (EP/L015579/1).
+> License: [CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/)
 ---
 
 ## ✨ Key Features
